@@ -1,5 +1,7 @@
 # My music taste, by the numbers
 
-An interactive visualization and statistical analysis of my 900-song playlist.
+An interactive visualization and statistical analysis of my music library.
 
-See it live [here](https://henrymartin5.github.io/musicViz)!
+See it live [here](https://samfreund.github.io/musicViz)!
+
+Shamelessly forked from [HENRYMARTIN5/musicViz](https://github.com/HENRYMARTIN5/musicViz)
