@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Henry Martin's music taste, by the numbers</title>
+    <title>Sam Freund's music taste, by the numbers</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/holiday.css@0.11.2" />
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
@@ -62,7 +62,7 @@
 
 <body>
     <header>
-        <h1>Henry Martin's music taste, by the numbers</h1>
+        <h1>Sam Freund's music taste, by the numbers</h1>
         <p>Click on any bar or chart segment to see the songs inside!</p>
     </header>
 
@@ -104,16 +104,6 @@
         <div class="chart-container xs">
             <h2>Songs by Number of Artists</h2>
             <canvas id="collaborationChart"></canvas>
-        </div>
-
-        <div class="chart-container">
-            <h2>Explicitness by Genre</h2>
-            <canvas id="genreExplicitnessChart"></canvas>
-        </div>
-
-        <div class="chart-container xs">
-            <h2>Explicit Content (Overall)</h2>
-            <canvas id="explicitChart"></canvas>
         </div>
     </main>
 
@@ -157,11 +147,6 @@
                     case 'artist':
                          title = `Artist: ${filterValue}`;
                         filteredSongs = songs.filter(s => (s.artists || []).includes(filterValue));
-                        break;
-                    case 'explicit':
-                        const isExplicit = filterValue === 'Explicit';
-                        title = `${filterValue} Songs`;
-                        filteredSongs = songs.filter(s => s.is_explicit === isExplicit);
                         break;
                     case 'duration':
                         title = `Duration: ${filterValue}`;
@@ -234,9 +219,6 @@
             });
             const sortedArtists = Object.entries(artistCounts).sort(([, a], [, b]) => b - a).slice(0, 150);
 
-            const explicitCount = songs.filter(song => song.is_explicit).length;
-            const notExplicitCount = songs.length - explicitCount;
-
             const durationBins = {
                 '0-1 min': 0,
                 '1-2 mins': 0,
@@ -300,28 +282,6 @@
             });
             const collabLabels = Object.keys(collabCounts).map(k => `${k} Artist${k > 1 ? 's' : ''}`);
 
-            const topGenresForExplicitness = sortedGenres.slice(0, 25).map(item => item[0]);
-            const genreExplicitnessData = {}; 
-            topGenresForExplicitness.forEach(genre => genreExplicitnessData[genre] = { explicit: 0, not_explicit: 0 });
-            songs.forEach(song => {
-                (song.genres || []).forEach(genre => {
-                    if (genreExplicitnessData[genre]) {
-                        if (song.is_explicit) genreExplicitnessData[genre].explicit++;
-                        else genreExplicitnessData[genre].not_explicit++;
-                    }
-                });
-            });
-            const explicitDataset = {
-                label: 'Explicit',
-                data: topGenresForExplicitness.map(g => genreExplicitnessData[g].explicit),
-                backgroundColor: '#ff6384'
-            };
-            const notExplicitDataset = {
-                label: 'Not Explicit',
-                data: topGenresForExplicitness.map(g => genreExplicitnessData[g].not_explicit),
-                backgroundColor: '#36a2eb'
-            };
-
             const genreChart = new Chart(document.getElementById('genreChart'), {
                 type: 'bar',
                 data: { labels: sortedGenres.map(item => item[0]), datasets: [{ label: '# of Songs', data: sortedGenres.map(item => item[1]), backgroundColor: '#ff6384' }] },
@@ -350,13 +310,6 @@
             });
             artistChart.options.onClick = createClickHandler(artistChart, 'artist');
             
-            const explicitChart = new Chart(document.getElementById('explicitChart'), {
-                type: 'doughnut',
-                data: { labels: ['Explicit', 'Not Explicit'], datasets: [{ data: [explicitCount, notExplicitCount], backgroundColor: ['#cc65fe', '#4bc0c0'], }] },
-                options: {}
-            });
-            explicitChart.options.onClick = createClickHandler(explicitChart, 'explicit');
-
             const durationHistogramChart = new Chart(document.getElementById('durationHistogramChart'), {
                 type: 'bar',
                 data: { labels: Object.keys(durationBins), datasets: [{ data: Object.values(durationBins), backgroundColor: '#ff9f40' }] },
@@ -370,29 +323,6 @@
                 options: { plugins: { legend: { display: false } } }
             });
             collaborationChart.options.onClick = createClickHandler(collaborationChart, 'collaboration');
-
-            const genreExplicitnessChart = new Chart(document.getElementById('genreExplicitnessChart'), {
-                type: 'bar',
-                data: {
-                    labels: topGenresForExplicitness,
-                    datasets: [notExplicitDataset, explicitDataset]
-                },
-                options: {
-                    indexAxis: 'y',
-                    scales: {
-                        x: { stacked: true },
-                        y: { stacked: true }
-                    }
-                }
-            });
-            genreExplicitnessChart.options.onClick = function(event) {
-                    const points = genreExplicitnessChart.getElementsAtEventForMode(event, 'nearest', { intersect: true }, true);
-                    if (points.length) {
-                        const firstPoint = points[0];
-                        const label = genreExplicitnessChart.data.labels[firstPoint.index];
-                        showSongsInModal('genre', label);
-                    }
-            };
         }
 
         init();

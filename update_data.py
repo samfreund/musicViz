@@ -1,12 +1,12 @@
 from typing import List
-from ytmusicapi import YTMusic
 import os
 import json
 from tqdm import tqdm
 import musicbrainzngs
+import requests
 
 GENRE_CACHE_FILE = "genre_cache.json"
-ALBUM_YEAR_CACHE_FILE = "album_year_cache.json"
+JELLYFIN_CACHE_FILE = "jellyfin_library_cache.json"
 
 def load_cache(filepath: str) -> dict:
     """Loads a JSON cache file if it exists."""
@@ -19,6 +19,39 @@ def save_cache(cache: dict, filepath: str):
     """Saves a cache dictionary to a JSON file."""
     with open(filepath, "w") as f:
         json.dump(cache, f, indent=2)
+
+def get_jellyfin_library(server_url: str, api_key: str, user_id: str) -> List[dict]:
+    """
+    Fetches all music items from Jellyfin server.
+    
+    Args:
+        server_url: The base URL of your Jellyfin server (e.g., http://localhost:8096)
+        api_key: Your Jellyfin API key
+        user_id: Your Jellyfin user ID
+    
+    Returns:
+        list: List of music items from Jellyfin
+    """
+    headers = {
+        "X-Emby-Token": api_key
+    }
+    
+    # Get all audio items
+    params = {
+        "userId": user_id,
+        "IncludeItemTypes": "Audio",
+        "Recursive": "true",
+        "Fields": "Genres,DateCreated,MediaSources,Duration,Album,AlbumArtist,Artists,ProductionYear"
+    }
+    
+    response = requests.get(
+        f"{server_url}/Items",
+        headers=headers,
+        params=params
+    )
+    response.raise_for_status()
+    
+    return response.json().get("Items", [])
 
 def get_genres(artist_name: str, song_title: str) -> List[str]:
     """
@@ -58,71 +91,91 @@ def get_genres(artist_name: str, song_title: str) -> List[str]:
 
     return []
 
-print("Logging in...")
-ytmusic = YTMusic()
+# Get Jellyfin connection details from environment variables
+JELLYFIN_URL = os.getenv("JELLYFIN_URL", "http://localhost:8096")
+JELLYFIN_API_KEY = os.getenv("JELLYFIN_API_KEY")
+JELLYFIN_USER_ID = os.getenv("JELLYFIN_USER_ID")
 
-if not os.path.exists("playlist_cache.json"):
-    playlist_id = os.getenv("PLAYLIST_ID", "PLIgbDqfLovfQ8o5jWuQFL0p36vLxu1487")
-    print("Fetching playlist...")
-    playlist = ytmusic.get_playlist(playlist_id, limit=None)
-    with open("playlist_cache.json", "w") as f:
-        json.dump(playlist, f)
+if not JELLYFIN_API_KEY:
+    print("Error: JELLYFIN_API_KEY environment variable not set")
+    print("You can find your API key in Jellyfin Dashboard -> API Keys")
+    exit(1)
+
+if not JELLYFIN_USER_ID:
+    print("Error: JELLYFIN_USER_ID environment variable not set")
+    print("You can find your user ID in Jellyfin Dashboard -> Users")
+    exit(1)
+
+print(f"Connecting to Jellyfin server at {JELLYFIN_URL}...")
+
+if not os.path.exists(JELLYFIN_CACHE_FILE):
+    print("Fetching music library from Jellyfin...")
+    try:
+        library = get_jellyfin_library(JELLYFIN_URL, JELLYFIN_API_KEY, JELLYFIN_USER_ID)
+        with open(JELLYFIN_CACHE_FILE, "w") as f:
+            json.dump(library, f)
+        print(f"Found {len(library)} tracks")
+    except requests.exceptions.RequestException as e:
+        print(f"Error connecting to Jellyfin: {e}")
+        exit(1)
 else:
-    print("Loading playlist from playlist_cache.json...")
-    with open("playlist_cache.json", "r") as f:
-        playlist = json.load(f)
+    print(f"Loading library from {JELLYFIN_CACHE_FILE}...")
+    with open(JELLYFIN_CACHE_FILE, "r") as f:
+        library = json.load(f)
+    print(f"Loaded {len(library)} tracks from cache")
 
 print("Loading API caches...")
 genre_cache = load_cache(GENRE_CACHE_FILE)
-album_year_cache = load_cache(ALBUM_YEAR_CACHE_FILE)
 
 out = []
 
 try:
     print("Processing tracks...")
-    for song in tqdm(playlist["tracks"]):
-        primary_artist = song['artists'][0]['name'] if song.get('artists') else 'Unknown Artist'
-        title = song.get('title', 'Unknown Title')
-        genre_cache_key = f"{primary_artist}::{title}".lower()
-
-        if genre_cache_key in genre_cache:
-            genres = genre_cache[genre_cache_key]
-        else:
-            genres = get_genres(primary_artist, title)
-            genre_cache[genre_cache_key] = genres
+    for song in tqdm(library):
+        title = song.get('Name', 'Unknown Title')
         
-        release_year = None
-        if song.get('album'):
-            album_id = song.get('album', {}).get('id')
-        else:
-            album_id = None
-
-        if album_id:
-            album_name = song.get('album').get('name')
-            if album_id in album_year_cache:
-                release_year = album_year_cache[album_id]
+        # Get artist - prefer AlbumArtist, fall back to Artists
+        artists = []
+        if song.get('AlbumArtist'):
+            artists = [song['AlbumArtist']]
+        elif song.get('Artists'):
+            artists = song['Artists']
+        
+        primary_artist = artists[0] if artists else 'Unknown Artist'
+        
+        # Check if Jellyfin already has genre tags
+        jellyfin_genres = song.get('Genres', [])
+        
+        # Only query MusicBrainz if we don't have genres from Jellyfin
+        if not jellyfin_genres:
+            genre_cache_key = f"{primary_artist}::{title}".lower()
+            
+            if genre_cache_key in genre_cache:
+                genres = genre_cache[genre_cache_key]
             else:
-                try:
-                    album_details = ytmusic.get_album(album_id)
-                    release_year = album_details.get('year')
-                    album_year_cache[album_id] = release_year
-                except Exception:
-                    album_year_cache[album_id] = None
+                genres = get_genres(primary_artist, title)
+                genre_cache[genre_cache_key] = genres
         else:
-            album_name = "Unknown Album"
+            genres = jellyfin_genres
         
-
-        out.append(
-            {
-                'title': song['title'],
-                'artists': [artist['name'] for artist in song.get('artists', [])],
-                'is_explicit': song['isExplicit'],
-                'duration': song['duration_seconds'],
-                'genres': genres,
-                'album': album_name,
-                'year': release_year
-            }
-        )
+        # Get duration in seconds (Jellyfin stores in ticks, 10,000,000 ticks = 1 second)
+        duration_seconds = None
+        if 'RunTimeTicks' in song:
+            duration_seconds = song['RunTimeTicks'] / 10000000
+        
+        # Get album and year
+        album_name = song.get('Album', 'Unknown Album')
+        release_year = song.get('ProductionYear')
+        
+        out.append({
+            'title': title,
+            'artists': artists,
+            'duration': duration_seconds,
+            'genres': genres,
+            'album': album_name,
+            'year': release_year
+        })
+        
 except KeyboardInterrupt:
     print("\nInterrupted, saving anyway")
 finally:
@@ -132,5 +185,4 @@ finally:
     
     print("Saving caches...")
     save_cache(genre_cache, GENRE_CACHE_FILE)
-    save_cache(album_year_cache, ALBUM_YEAR_CACHE_FILE)
     print("Done.")
